@@ -1,0 +1,516 @@
+import java.util.*;
+
+/*
+ * ARCHIVO HISTORICO DEPARTAMENTAL - PLAN DE DIGITALIZACION
+ * Patrones: Abstract Factory (familias por soporte), Factory Method (signaturas por fondo),
+ * Prototype (fichas catalograficas de serie).
+ *
+ * Nota sobre el calculo de jornadas: el enunciado dice "jornadas efectivas de 6.5 horas
+ * con 2 estaciones de trabajo en paralelo". Aqui se interpreta como: las 2 estaciones
+ * duplican el rendimiento (se divide el total de horas entre 2), y luego se convierte
+ * a jornadas de 6.5 horas redondeando hacia arriba. Es la lectura literal de la formula
+ * del punto 5.2; si el profesor quiere otra interpretacion, el metodo
+ * Planificador.calcularVolumenYTiempo() es el unico lugar que hay que ajustar.
+ */
+
+// ============================================================
+// ABSTRACT FACTORY - familias tecnicas por soporte (punto 4.1)
+// ============================================================
+
+interface PerfilCaptura {
+    String getDescripcion();
+}
+
+interface EsquemaMetadatos {
+    String getNombre();
+    List<String> getCamposObligatorios();
+}
+
+interface PoliticaAlmacenamiento {
+    int getNumeroCopias();
+    String getDescripcion();
+    String getAlgoritmoChecksum();
+}
+
+interface FabricaSoporte {
+    PerfilCaptura crearPerfilCaptura();
+    EsquemaMetadatos crearEsquemaMetadatos();
+    PoliticaAlmacenamiento crearPoliticaAlmacenamiento();
+    double getMbPorImagen();
+    double getTasaCaptura();
+    String getNombreSoporte();
+}
+
+class PerfilCapturaSimple implements PerfilCaptura {
+    private String descripcion;
+    public PerfilCapturaSimple(String descripcion) { this.descripcion = descripcion; }
+    public String getDescripcion() { return descripcion; }
+}
+
+class EsquemaMetadatosSimple implements EsquemaMetadatos {
+    private String nombre;
+    private List<String> campos;
+    public EsquemaMetadatosSimple(String nombre, List<String> campos) {
+        this.nombre = nombre;
+        this.campos = campos;
+    }
+    public String getNombre() { return nombre; }
+    public List<String> getCamposObligatorios() { return campos; }
+}
+
+class PoliticaAlmacenamientoSimple implements PoliticaAlmacenamiento {
+    private int copias;
+    private String descripcion;
+    private String checksum;
+    public PoliticaAlmacenamientoSimple(int copias, String descripcion, String checksum) {
+        this.copias = copias;
+        this.descripcion = descripcion;
+        this.checksum = checksum;
+    }
+    public int getNumeroCopias() { return copias; }
+    public String getDescripcion() { return descripcion; }
+    public String getAlgoritmoChecksum() { return checksum; }
+}
+
+class FabricaPapelFragil implements FabricaSoporte {
+    public PerfilCaptura crearPerfilCaptura() {
+        return new PerfilCapturaSimple("400 dpi, 24 bits color, luz fria difusa, maestro TIFF sin compresion");
+    }
+    public EsquemaMetadatos crearEsquemaMetadatos() {
+        return new EsquemaMetadatosSimple("ISAD(G)", Arrays.asList(
+            "codigoReferencia", "titulo", "fechaExtrema", "nivelDescripcion",
+            "volumenSoporte", "productor", "alcanceContenido"));
+    }
+    public PoliticaAlmacenamiento crearPoliticaAlmacenamiento() {
+        return new PoliticaAlmacenamientoSimple(3, "3 copias (local, nube, cinta)", "SHA-256");
+    }
+    public double getMbPorImagen() { return 65; }
+    public double getTasaCaptura() { return 120; }
+    public String getNombreSoporte() { return "PAPEL_FRAGIL"; }
+}
+
+class FabricaMicrofilm implements FabricaSoporte {
+    public PerfilCaptura crearPerfilCaptura() {
+        return new PerfilCapturaSimple("600 dpi, 8 bits escala de grises, retroiluminacion, maestro TIFF G4");
+    }
+    public EsquemaMetadatos crearEsquemaMetadatos() {
+        return new EsquemaMetadatosSimple("Dublin Core extendido", Arrays.asList(
+            "titulo", "escala", "sistemaDeReferencia", "fecha", "cobertura"));
+    }
+    public PoliticaAlmacenamiento crearPoliticaAlmacenamiento() {
+        return new PoliticaAlmacenamientoSimple(2, "2 copias (local, nube)", "SHA-256");
+    }
+    public double getMbPorImagen() { return 12; }
+    public double getTasaCaptura() { return 400; }
+    public String getNombreSoporte() { return "MICROFILM"; }
+}
+
+class FabricaPlacaVidrio implements FabricaSoporte {
+    public PerfilCaptura crearPerfilCaptura() {
+        return new PerfilCapturaSimple("1200 dpi, 48 bits color, mesa de luz calibrada, maestro DNG");
+    }
+    public EsquemaMetadatos crearEsquemaMetadatos() {
+        return new EsquemaMetadatosSimple("VRA Core", Arrays.asList(
+            "titulo", "autor", "fecha", "tecnica", "dimensiones",
+            "material", "ubicacion", "coleccion", "derechos"));
+    }
+    public PoliticaAlmacenamiento crearPoliticaAlmacenamiento() {
+        return new PoliticaAlmacenamientoSimple(3, "3 copias (local, nube, cinta)", "SHA-512");
+    }
+    public double getMbPorImagen() { return 180; }
+    public double getTasaCaptura() { return 45; }
+    public String getNombreSoporte() { return "PLACA_VIDRIO"; }
+}
+
+// ============================================================
+// FACTORY METHOD - generacion de la signatura por fondo (4.2)
+// ============================================================
+
+class Signatura {
+    private String valor;
+    public Signatura(String valor) { this.valor = valor; }
+    public String toString() { return valor; }
+}
+
+class ItemDocumental {
+    String titulo;
+    int anio;
+    int folios;
+    Integer notaria;   // solo fondo NOTARIAL
+    String escala;     // solo fondo CARTOGRAFICO
+    String autor;      // solo fondo FOTOGRAFICO
+    Map<String, String> metadatos = new LinkedHashMap<>();
+    Signatura signatura;
+
+    public ItemDocumental(String titulo, int anio, int folios) {
+        this.titulo = titulo;
+        this.anio = anio;
+        this.folios = folios;
+    }
+
+    public void setMetadato(String campo, String valor) { metadatos.put(campo, valor); }
+    public void setSignatura(Signatura s) { this.signatura = s; }
+}
+
+abstract class FondoDocumental {
+    protected int consecutivo = 0;
+    private String nombreFondo;
+
+    public FondoDocumental(String nombreFondo) { this.nombreFondo = nombreFondo; }
+
+    // Metodo publico: lleva el consecutivo, valida y devuelve el item signado
+    public ItemDocumental registrar(ItemDocumental item) {
+        if (item.titulo == null || item.titulo.isBlank()) {
+            throw new IllegalArgumentException("El item debe tener titulo");
+        }
+        if (item.folios <= 0) {
+            throw new IllegalArgumentException("El item debe tener folios > 0");
+        }
+        consecutivo++;
+        Signatura signatura = crearSignatura(item);
+        item.setSignatura(signatura);
+        return item;
+    }
+
+    // Metodo fabrica: cada fondo decide su propio patron de signatura
+    protected abstract Signatura crearSignatura(ItemDocumental item);
+
+    public String getNombreFondo() { return nombreFondo; }
+}
+
+class FondoNotarial extends FondoDocumental {
+    public FondoNotarial() { super("NOTARIAL"); }
+    protected Signatura crearSignatura(ItemDocumental item) {
+        String valor = String.format("NOT-%d-N%02d-%05d", item.anio, item.notaria, consecutivo);
+        return new Signatura(valor);
+    }
+}
+
+class FondoCartografico extends FondoDocumental {
+    public FondoCartografico() { super("CARTOGRAFICO"); }
+    protected Signatura crearSignatura(ItemDocumental item) {
+        String valor = String.format("CAR-%s-%04d", item.escala, consecutivo);
+        return new Signatura(valor);
+    }
+}
+
+class FondoFotografico extends FondoDocumental {
+    public FondoFotografico() { super("FOTOGRAFICO"); }
+    protected Signatura crearSignatura(ItemDocumental item) {
+        int decada = (item.anio / 10) * 10;
+        String iniciales = calcularIniciales(item.autor);
+        String valor = String.format("FOT-%ds-%s-%04d", decada, iniciales, consecutivo);
+        return new Signatura(valor);
+    }
+    private String calcularIniciales(String autor) {
+        if (autor == null || autor.trim().isEmpty()) return "XXX";
+        String[] partes = autor.trim().split("\\s+");
+        StringBuilder sb = new StringBuilder();
+        for (String p : partes) sb.append(Character.toUpperCase(p.charAt(0)));
+        return sb.toString();
+    }
+}
+
+// ============================================================
+// PROTOTYPE - fichas catalograficas de serie (4.3)
+// ============================================================
+
+class ProductorDocumental {
+    String nombre;
+    List<String> cargos;
+
+    public ProductorDocumental(String nombre, List<String> cargos) {
+        this.nombre = nombre;
+        this.cargos = new ArrayList<>(cargos);
+    }
+
+    // clonacion propia (no compartir la lista de cargos)
+    public ProductorDocumental copiaProfunda() {
+        return new ProductorDocumental(this.nombre, new ArrayList<>(this.cargos));
+    }
+}
+
+class FichaCatalografica {
+    String fondo;
+    ProductorDocumental productor;
+    String alcance;
+    String condicionesAcceso;
+    String idioma;
+    List<String> descriptores;
+
+    // lo unico que cambia por item
+    String titulo;
+    String fechaExtrema;
+    int folios;
+
+    public FichaCatalografica(String fondo, ProductorDocumental productor, String alcance,
+                               String condicionesAcceso, String idioma, List<String> descriptores) {
+        this.fondo = fondo;
+        this.productor = productor;
+        this.alcance = alcance;
+        this.condicionesAcceso = condicionesAcceso;
+        this.idioma = idioma;
+        this.descriptores = new ArrayList<>(descriptores);
+    }
+
+    // Prototype: clonacion en profundidad
+    public FichaCatalografica clonar() {
+        FichaCatalografica copia = new FichaCatalografica(
+            this.fondo,
+            this.productor.copiaProfunda(),   // productor independiente
+            this.alcance,
+            this.condicionesAcceso,
+            this.idioma,
+            this.descriptores                  // el constructor ya copia la lista
+        );
+        copia.titulo = this.titulo;
+        copia.fechaExtrema = this.fechaExtrema;
+        copia.folios = this.folios;
+        return copia;
+    }
+
+    public void agregarDescriptor(String descriptor) { this.descriptores.add(descriptor); }
+    public void agregarCargoProductor(String cargo) { this.productor.cargos.add(cargo); }
+}
+
+// ============================================================
+// COMPONENTE ALGORITMICO (punto 5)
+// ============================================================
+
+class Lote {
+    String nombre;
+    FabricaSoporte fabrica;
+    int imagenes;
+    int deterioro;          // 1 a 5
+    int consultasAnuales;
+    int anioMasAntiguo;
+
+    double volumenGB;
+    int jornadas;
+    double indicePrioridad;
+    int jornadaInicio;
+    int jornadaFin;
+
+    public Lote(String nombre, FabricaSoporte fabrica, int imagenes, int deterioro,
+                int consultasAnuales, int anioMasAntiguo) {
+        this.nombre = nombre;
+        this.fabrica = fabrica;
+        this.imagenes = imagenes;
+        this.deterioro = deterioro;
+        this.consultasAnuales = consultasAnuales;
+        this.anioMasAntiguo = anioMasAntiguo;
+    }
+}
+
+class ValidadorMetadatos {
+    public List<String> validar(ItemDocumental item, FabricaSoporte fabrica) {
+        List<String> faltantes = new ArrayList<>();
+        for (String campo : fabrica.crearEsquemaMetadatos().getCamposObligatorios()) {
+            String valor = item.metadatos.get(campo);
+            if (valor == null || valor.isBlank()) {
+                faltantes.add(campo);
+            }
+        }
+        return faltantes;
+    }
+}
+
+class Planificador {
+    static final double HORAS_JORNADA = 6.5;
+    static final int ESTACIONES = 2;
+
+    // 5.1 volumen + 5.2 tiempo
+    public void calcularVolumenYTiempo(Lote lote) {
+        int copias = lote.fabrica.crearPoliticaAlmacenamiento().getNumeroCopias();
+        double mbTotal = lote.imagenes * lote.fabrica.getMbPorImagen() * copias;
+        lote.volumenGB = round(mbTotal / 1024.0, 2);
+
+        double horas = lote.imagenes / lote.fabrica.getTasaCaptura();
+        double horasEfectivas = horas / ESTACIONES;
+        lote.jornadas = (int) Math.ceil(horasEfectivas / HORAS_JORNADA);
+    }
+
+    // 5.3 priorizacion
+    public void calcularPrioridad(List<Lote> lotes, int anioActual) {
+        int maxConsultas = lotes.stream().mapToInt(l -> l.consultasAnuales).max().orElse(1);
+        int maxAntiguedad = lotes.stream()
+            .mapToInt(l -> anioActual - l.anioMasAntiguo).max().orElse(1);
+
+        for (Lote l : lotes) {
+            int antiguedad = anioActual - l.anioMasAntiguo;
+            double indice = 0.55 * (l.deterioro / 5.0)
+                          + 0.30 * ((double) l.consultasAnuales / maxConsultas)
+                          + 0.15 * ((double) antiguedad / maxAntiguedad);
+            l.indicePrioridad = round(indice, 3);
+        }
+    }
+
+    public List<Lote> priorizar(List<Lote> lotes) {
+        List<Lote> ordenado = new ArrayList<>(lotes);
+        ordenado.sort((a, b) -> {
+            int cmp = Double.compare(b.indicePrioridad, a.indicePrioridad);
+            if (cmp != 0) return cmp;
+            return Integer.compare(b.deterioro, a.deterioro); // empate -> mayor deterioro primero
+        });
+        return ordenado;
+    }
+
+    // 5.4 cronograma
+    public void generarCronograma(List<Lote> lotesPriorizados) {
+        int jornadaActual = 1;
+        for (Lote l : lotesPriorizados) {
+            l.jornadaInicio = jornadaActual;
+            l.jornadaFin = jornadaActual + l.jornadas - 1;
+            jornadaActual = l.jornadaFin + 1;
+        }
+    }
+
+    static double round(double valor, int decimales) {
+        double factor = Math.pow(10, decimales);
+        return Math.round(valor * factor) / factor;
+    }
+}
+
+// ============================================================
+// MAIN - programa de demostracion (punto 6)
+// ============================================================
+
+public class Main {
+    public static void main(String[] args) {
+        System.out.println("=== ARCHIVO HISTORICO DEPARTAMENTAL - PLAN DE DIGITALIZACION ===\n");
+
+        // ---------- 1. Ficha modelo de serie + clonacion (Prototype) ----------
+        ProductorDocumental notaria3 = new ProductorDocumental(
+            "Notaria 3 de la ciudad", Arrays.asList("Notario titular", "Secretario"));
+
+        FichaCatalografica fichaModelo = new FichaCatalografica(
+            "NOTARIAL", notaria3, "Protocolos de escrituras publicas",
+            "Acceso restringido - requiere autorizacion", "Espanol",
+            Arrays.asList("Notariado", "Propiedad raiz", "Siglo XIX"));
+
+        FondoNotarial fondoNotarial = new FondoNotarial();
+        List<FichaCatalografica> fichasSerie = new ArrayList<>();
+        List<ItemDocumental> itemsNotarial = new ArrayList<>();
+
+        String[] titulos = {"Escritura 112 de 1887", "Escritura 118 de 1887", "Escritura 121 de 1887",
+                             "Escritura 130 de 1887", "Escritura 145 de 1887"};
+        int[] folios = {8, 12, 6, 9, 11};
+
+        for (int i = 0; i < 5; i++) {
+            FichaCatalografica ficha = fichaModelo.clonar();
+            ficha.titulo = titulos[i];
+            ficha.fechaExtrema = "1887";
+            ficha.folios = folios[i];
+            fichasSerie.add(ficha);
+
+            ItemDocumental item = new ItemDocumental(ficha.titulo, 1887, ficha.folios);
+            item.notaria = 3;
+            fondoNotarial.registrar(item);
+            itemsNotarial.add(item);
+        }
+
+        // personalizar UN item sin afectar la ficha modelo ni los demas
+        fichasSerie.get(1).agregarDescriptor("Litigio de tierras");
+        fichasSerie.get(1).agregarCargoProductor("Testigo instrumental");
+
+        System.out.println("Ficha modelo: '" + fichaModelo.alcance + "' | descriptores: "
+            + fichaModelo.descriptores.size() + " | cargos productor: " + fichaModelo.productor.cargos.size());
+        for (int i = 0; i < itemsNotarial.size(); i++) {
+            System.out.println("  " + itemsNotarial.get(i).signatura + "  " + fichasSerie.get(i).titulo
+                + "  folios " + fichasSerie.get(i).folios
+                + (i == 1 ? "  <- descriptor agregado" : ""));
+        }
+        System.out.println("  Verificacion ficha modelo -> descriptores: " + fichaModelo.descriptores.size()
+            + " | cargos: " + fichaModelo.productor.cargos.size() + "  (intacta)");
+
+        // ---------- 2. Registro en los tres fondos (Factory Method) ----------
+        System.out.println("\nSIGNATURAS POR FONDO (consecutivos independientes)");
+
+        FondoCartografico fondoCartografico = new FondoCartografico();
+        FabricaSoporte fabricaMicrofilm = new FabricaMicrofilm();
+
+        ItemDocumental mapa1 = new ItemDocumental("Plano urbano 1925", 1925, 1);
+        mapa1.escala = "25000";
+        fondoCartografico.registrar(mapa1);
+        mapa1.setMetadato("titulo", "Plano urbano 1925");
+        mapa1.setMetadato("fecha", "1925");
+        // a proposito NO se cargan "escala" ni "sistemaDeReferencia"
+
+        ItemDocumental mapa2 = new ItemDocumental("Plano rural 1930", 1930, 1);
+        mapa2.escala = "25000";
+        fondoCartografico.registrar(mapa2);
+        mapa2.setMetadato("titulo", "Plano rural 1930");
+        mapa2.setMetadato("escala", "25000");
+        mapa2.setMetadato("sistemaDeReferencia", "MAGNA-SIRGAS");
+        mapa2.setMetadato("fecha", "1930");
+        mapa2.setMetadato("cobertura", "Zona rural");
+
+        FondoFotografico fondoFotografico = new FondoFotografico();
+        FabricaSoporte fabricaPlacaVidrio = new FabricaPlacaVidrio();
+
+        ItemDocumental foto1 = new ItemDocumental("Plaza principal", 1927, 1);
+        foto1.autor = null; // autor desconocido -> XXX en la signatura
+        fondoFotografico.registrar(foto1);
+        foto1.setMetadato("titulo", "Plaza principal");
+        foto1.setMetadato("fecha", "1927");
+        // a proposito faltan autor, tecnica y dimensiones
+
+        System.out.println("  NOTARIAL      -> " + itemsNotarial.get(itemsNotarial.size() - 1).signatura);
+        System.out.println("  CARTOGRAFICO  -> " + mapa2.signatura);
+        System.out.println("  FOTOGRAFICO   -> " + foto1.signatura);
+
+        // ---------- 3. Lotes y plan de recursos (Abstract Factory) ----------
+        System.out.println("\nPLAN DE RECURSOS POR LOTE");
+
+        List<Lote> lotes = new ArrayList<>();
+        lotes.add(new Lote("Protocolos 1880-1890", new FabricaPapelFragil(), 24000, 4, 520, 1880));
+        lotes.add(new Lote("Prensa regional 1955-1970", new FabricaMicrofilm(), 86000, 2, 310, 1955));
+        lotes.add(new Lote("Placas Quintero", new FabricaPlacaVidrio(), 1800, 5, 140, 1925));
+        lotes.add(new Lote("Negativos estudio Delgado", new FabricaPlacaVidrio(), 950, 3, 90, 1940));
+
+        Planificador planificador = new Planificador();
+        double volumenTotalGB = 0;
+
+        System.out.printf("%-28s%-14s%-8s%-8s%-14s%-10s%n",
+            "LOTE", "SOPORTE", "IMGS", "COPIAS", "VOLUMEN", "JORNADAS");
+        for (Lote l : lotes) {
+            planificador.calcularVolumenYTiempo(l);
+            volumenTotalGB += l.volumenGB;
+            int copias = l.fabrica.crearPoliticaAlmacenamiento().getNumeroCopias();
+            System.out.printf("%-28s%-14s%-8d%-8d%-14s%-10d%n",
+                l.nombre, l.fabrica.getNombreSoporte(), l.imagenes, copias,
+                String.format("%.2f GB", l.volumenGB), l.jornadas);
+        }
+        System.out.printf("%-28s%-14s%-8s%-8s%-14s%n", "TOTAL", "", "", "",
+            String.format("%.3f TB", volumenTotalGB / 1024.0));
+
+        // ---------- 4. Priorizacion y cronograma ----------
+        System.out.println("\nPRIORIZACION Y CRONOGRAMA");
+        int anioActual = 2026;
+        planificador.calcularPrioridad(lotes, anioActual);
+        List<Lote> priorizados = planificador.priorizar(lotes);
+        planificador.generarCronograma(priorizados);
+
+        System.out.printf("%-3s%-28s%-6s%-10s%-10s%-10s%-8s%-6s%n",
+            "#", "LOTE", "DET", "CONS/ANO", "INDICE", "JORNADAS", "INICIO", "FIN");
+        int pos = 1;
+        for (Lote l : priorizados) {
+            System.out.printf("%-3d%-28s%-6d%-10d%-10.3f%-10d%-8d%-6d%n",
+                pos++, l.nombre, l.deterioro, l.consultasAnuales, l.indicePrioridad,
+                l.jornadas, l.jornadaInicio, l.jornadaFin);
+        }
+
+        // ---------- 5. Metadatos incompletos ----------
+        System.out.println("\nMETADATOS INCOMPLETOS");
+        ValidadorMetadatos validador = new ValidadorMetadatos();
+
+        List<String> faltantesMapa1 = validador.validar(mapa1, fabricaMicrofilm);
+        if (!faltantesMapa1.isEmpty()) {
+            System.out.println("  " + mapa1.signatura + " -> faltan: " + String.join(", ", faltantesMapa1));
+        }
+        List<String> faltantesFoto1 = validador.validar(foto1, fabricaPlacaVidrio);
+        if (!faltantesFoto1.isEmpty()) {
+            System.out.println("  " + foto1.signatura + " -> faltan: " + String.join(", ", faltantesFoto1));
+        }
+    }
+}
